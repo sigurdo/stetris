@@ -8,6 +8,13 @@
 #include <string.h>
 #include <time.h>
 #include <poll.h>
+#include <sys/mman.h>
+#include <err.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <linux/ioctl.h>
+#include <errno.h>
 
 
 // The game state can be used to detect what happens on the playfield
@@ -59,10 +66,87 @@ gameConfig game = {
 };
 
 
+// Custom macros:
+#define RD_VALUE _IO('a', 'b')
+
+
+// Custom types:
+struct js_event {
+  __u32 time;     /* event timestamp in milliseconds */
+  __s16 value;    /* value */
+  __u8 type;      /* event type */
+  __u8 number;    /* axis/button number */
+};
+
+// struct pollfd {
+//   int   fd;         /* file descriptor */
+//   short events;     /* requested events */
+//   short revents;    /* returned events */
+// };
+
+// Custom variables:
+int fd;
+struct pollfd pollfd_struct;
+char *event6;
+struct stat statbuf;
+struct js_event event6_struct;
+
+// Test variables:
+char *read_buf;
+
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat() {
+  // printf("Skal prøve...\n");
+  // if ((fd = open("/dev/input/event6", O_RDWR, 0)) == -1)
+  //   err(1, "open failed\n");
+  // if (fstat(fd, &statbuf))
+  //   err(1, "fstat failed");
+  // printf("fd: %d\n", fd);
+  // printf("size: %d\n", statbuf.st_size);
+  // // printf("venter litt...\n");
+  // // usleep(3000000);
+  // read_buf = malloc(1000);
+  // write(fd, "X", 1);
+  // read(fd, read_buf, statbuf.st_size);
+  // ioctl(fd, RD_VALUE, read_buf);
+  // printf("read byte: %d\n", read_buf[0]);
+  // event6 = (char*) mmap(NULL, statbuf.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+  // printf("event6 addr: 0x%x\n", event6);
+  // if (event6 == MAP_FAILED)
+  //   err(1, "mmap failed");
+  // close(fd);
+  // for (int i = 0; i < 10; i++) {
+  //   printf("Teller: %d\n", i);
+  //   printf("event6: %c\n", *(event6));
+  //   usleep(1000000);
+  // }
+  // printf("Sånn!\n");
+  // err(1, "hahahahah\n");
+
+  // read_buf = malloc(statbuf.st_size);
+  // read_buf[0] = 5;
+  // for (int i = 0; i < 5; i++)
+  //   printf("read_buf[%d]: %d\n", i, read_buf[i]);
+
+  printf("venter litt...\n");
+  usleep(3000000);
+
+  fd = open("/dev/input/event6", O_RDONLY);
+  pollfd_struct.fd = fd;
+  pollfd_struct.events = POLLIN;
+  printf("polling...\n");
+  poll(&pollfd_struct, 1, 3000);
+  printf("poll returned!\n");
+  int read_ret = read(fd, &event6_struct, sizeof(event6_struct));
+  printf("read_ret: %d\n", read_ret);
+  printf("errno: %d\n", errno);
+  printf("event: %d, %d, %d, %d\n", event6_struct.time, event6_struct.value, event6_struct.type, event6_struct.number);
+  usleep(1000);
+
+  exit(1);
+
   return true;
 }
 
