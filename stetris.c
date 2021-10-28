@@ -71,12 +71,6 @@ gameConfig game = {
 
 
 // Custom types:
-struct js_event {
-  __u32 time;     /* event timestamp in milliseconds */
-  __s16 value;    /* value */
-  __u8 type;      /* event type */
-  __u8 number;    /* axis/button number */
-};
 
 // struct pollfd {
 //   int   fd;         /* file descriptor */
@@ -89,7 +83,7 @@ int fd;
 struct pollfd pollfd_struct;
 char *event6;
 struct stat statbuf;
-struct js_event event6_struct;
+struct input_event event6_struct;
 
 // Test variables:
 char *read_buf;
@@ -130,19 +124,38 @@ bool initializeSenseHat() {
   // for (int i = 0; i < 5; i++)
   //   printf("read_buf[%d]: %d\n", i, read_buf[i]);
 
-  printf("venter litt...\n");
-  usleep(3000000);
-
-  fd = open("/dev/input/event6", O_RDONLY);
-  pollfd_struct.fd = fd;
+  // printf("venter litt...\n");
+  // usleep(3000000);
+fd = open("/dev/input/event0", O_RDONLY);
+pollfd_struct.fd = fd;
   pollfd_struct.events = POLLIN;
-  printf("polling...\n");
-  poll(&pollfd_struct, 1, 3000);
-  printf("poll returned!\n");
+  while (1) {
+      printf("while(1)\n");
+      printf("polling...\n");
+      poll(&pollfd_struct, 1, 3000);
+      printf("poll returned!\n");
+        while (read (fd, &event6_struct, sizeof(event6_struct)) > 0) {
+                // process_event (event6_struct);
+                printf("event!\n");
+                printf("event: %d, %d, %d, %d\n", event6_struct.time, event6_struct.type, event6_struct.code, event6_struct.value);
+        }
+        printf("hmmm?\n");
+        /* EAGAIN is returned when the queue is empty */
+        if (errno != EAGAIN) {
+                /* error */
+                printf("error\n");
+        }
+        printf("empty\n");
+        /* do something interesting with processed events */
+}
+
+
+  
+  
   int read_ret = read(fd, &event6_struct, sizeof(event6_struct));
   printf("read_ret: %d\n", read_ret);
   printf("errno: %d\n", errno);
-  printf("event: %d, %d, %d, %d\n", event6_struct.time, event6_struct.value, event6_struct.type, event6_struct.number);
+  printf("event: %d, %d, %d, %d\n", event6_struct.time, event6_struct.type, event6_struct.code, event6_struct.value);
   usleep(1000);
 
   exit(1);
