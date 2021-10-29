@@ -14,6 +14,8 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <linux/ioctl.h>
+#include <asm/ioctl.h>
+#include <linux/fb.h>
 #include <errno.h>
 
 
@@ -71,112 +73,212 @@ gameConfig game = {
 
 
 // Custom types:
-
-// struct pollfd {
-//   int   fd;         /* file descriptor */
-//   short events;     /* requested events */
-//   short revents;    /* returned events */
-// };
+// Framebuffer pixel struct type
+typedef struct __attribute__((__packed__)) {
+  int b:5;
+  int g:6;
+  int r:5;
+} fb_pixel_t;
 
 // Custom variables:
-int fd;
-struct pollfd pollfd_struct;
-int X = 0;
-char *eventX;
-struct stat statbuf;
-struct input_event eventX_struct;
+int                       fd;                    // Joystick events file descriptor
+struct pollfd             pollfd_struct;         // Joystick events pollfd struct
+int                       X = 0;                 // Joystick events file number
+char                     *eventX;                // Joystick events memory mapped
+struct stat               statbuf;               // Joystick events statbuf
+struct input_event        eventX_struct;         // Joystick events read struct
+int                       fb_fd;                 // Framebuffer file descriptor
+char                     *fb_dev_path;           // Framebuffer device file path
+struct stat               fb_statbuf;            // Framebuffer statbuf
+struct fb_fix_screeninfo  fb_fscreeninfo;        // Framebuffer fixed screeninfo struct
+struct fb_var_screeninfo  fb_vscreeninfo;        // Framebuffer varialbe screeninfo struct
+fb_pixel_t                *fb;                   // Framebuffer memory mapped
+fb_pixel_t                 fb_test;              // Framebuffer struct for testing
+fb_pixel_t                 colorfield[8 * 8 * sizeof(fb_pixel_t)]; // Array of colors for pixel at colorfield[x + (8 * y)]
+int                        color_hue_next;       // Next color hue to apply
+int                        double_input_toggler; // Used to fix double input problem
 
 // Test variables:
 char *read_buf;
-int test_fix;
+
+
+// Custom functions:
+int color_from_hue(int hue, int offset, int hue_max, int max) {
+  int hue_scale = max / hue_max;
+  int res = 0;
+  hue = (hue + offset) % hue_max;
+  if (hue < hue_max / 2) res = max - 2 * hue_scale * hue;
+  else res = 2 * hue_scale * hue - max;
+  if (res < 0) res = 0;
+  if (res > max) res = max;
+  return res;
+}
+
+
+void testing() {
+  printf("Skal prøve...\n");
+  if ((fd = open("/dev/input/eventX", O_RDWR, 0)) == -1)
+    err(1, "open failed\n");
+  if (fstat(fd, &statbuf))
+    err(1, "fstat failed");
+  printf("fd: %d\n", fd);
+  printf("size: %d\n", statbuf.st_size);
+  // printf("venter litt...\n");
+  // usleep(3000000);
+  read_buf = malloc(1000);
+  write(fd, "X", 1);
+  read(fd, read_buf, statbuf.st_size);
+  ioctl(fd, RD_VALUE, read_buf);
+  printf("read byte: %d\n", read_buf[0]);
+  eventX = (char*) mmap(NULL, statbuf.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+  printf("eventX addr: 0x%x\n", eventX);
+  if (eventX == MAP_FAILED)
+    err(1, "mmap failed");
+  close(fd);
+  for (int i = 0; i < 10; i++) {
+    printf("Teller: %d\n", i);
+    printf("eventX: %c\n", *(eventX));
+    usleep(1000000);
+  }
+  printf("Sånn!\n");
+  err(1, "hahahahah\n");
+
+  read_buf = malloc(statbuf.st_size);
+  read_buf[0] = 5;
+  for (int i = 0; i < 5; i++)
+    printf("read_buf[%d]: %d\n", i, read_buf[i]);
+
+  printf("venter litt...\n");
+  usleep(3000000);
+
+  int read_ret = read(fd, &eventX_struct, sizeof(eventX_struct));
+  printf("read_ret: %d\n", read_ret);
+  printf("errno: %d\n", errno);
+  printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
+  usleep(1000);
+}
+
+void hello_joystick() {
+  // Hello joystick
+  while (1) {
+    fd = open("/dev/input/event0", O_RDONLY);
+    printf("reading...\n");
+    read(fd, &eventX_struct, sizeof(eventX_struct));
+    printf("done reading %d\n", eventX_struct.code);
+
+    pollfd_struct.fd = fd;
+    pollfd_struct.events = POLLIN;
+    printf("polling...\n");
+    poll(&pollfd_struct, 1, 3000);
+    printf("poll returned!\n");
+    while (read(fd, &eventX_struct, sizeof(eventX_struct)) > 0) {
+      // printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
+      // printf("KEY_UP: %d, event code: %d\n", KEY_UP, eventX_struct.code);
+      switch (eventX_struct.code) {
+      case KEY_UP:
+        printf("KEY_UP\n");
+        break;
+      case KEY_RIGHT:
+        printf("RIGHT\n");
+        break;
+      case KEY_DOWN:
+        printf("DOWN\n");
+        break;
+      case KEY_LEFT:
+        printf("LEFT\n");
+        break;
+      case KEY_ENTER:
+        printf("ENTER\n");
+        break;
+      case 0:
+        printf("RELEASED\n");
+        break;
+      default:
+        printf("Unknown key\n");
+      }
+    }
+    printf("no more events to read\n");
+    /* EAGAIN is returned when the queue is empty */
+    if (errno != EAGAIN) {
+      /* error */
+      printf("error\n");
+    }
+    printf("empty\n");
+    /* do something interesting with processed events */
+  }
+}
+
+void hello_framebuffer() {
+  // Hello framebuffer:
+  printf("Hello frambuffer\n");
+  printf("Size: %d\n", sizeof(fb_pixel_t));
+  fb_test.r = 15;
+  fb_test.g = 7;
+  fb_test.b = 3;
+  printf("test: %x %x\n", *((__u8*) &fb_test), *(((__u8*) &fb_test) + 1));
+  fb_dev_path = "/dev/fb0";
+  fb_fd = open(fb_dev_path, O_RDWR);
+  int ioctl_ret = ioctl(fb_fd, FBIOGET_FSCREENINFO, &fb_fscreeninfo);
+  printf("ioctl_ret: %d\n", ioctl_ret);
+  ioctl_ret = ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_vscreeninfo);
+  printf("ioctl_ret: %d\n", ioctl_ret);
+
+  switch (errno) {
+    case EBADF: printf("EBADF\n"); break;
+    case EFAULT: printf("EFAULT\n"); break;
+    case EINVAL: printf("EINVAL\n"); break;
+    case ENOTTY: printf("ENOTTY\n"); break;
+    case 0: printf("SUCCESS\n"); break;
+    default: printf("none above\n"); break;
+  }
+
+  printf("fixed screeninfo:\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n",
+    fb_fscreeninfo.type,
+    fb_fscreeninfo.type_aux,
+    fb_fscreeninfo.mmio_len,
+    fb_fscreeninfo.mmio_start,
+    fb_fscreeninfo.accel,
+    fb_fscreeninfo.capabilities
+  );
+
+  printf("variable screeninfo:\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n",
+    fb_vscreeninfo.xres,
+    fb_vscreeninfo.yres,
+    fb_vscreeninfo.xres_virtual,
+    fb_vscreeninfo.yres_virtual,
+    fb_vscreeninfo.grayscale,
+    fb_vscreeninfo.bits_per_pixel,
+    fb_vscreeninfo.height,
+    fb_vscreeninfo.width
+  );
+
+  // Memory map framebuffer
+  fb = (fb_pixel_t*) mmap(NULL, 2 * 8 * 8, PROT_READ|PROT_WRITE, MAP_SHARED, fb_fd, 0);
+  if (fb == MAP_FAILED) printf("fb mmap failed\n");
+  close(fb_fd);
+
+  printf("write to fb\n");
+  for (int counter = 0; 1; counter = (counter + 1) % 31) {
+    usleep(20000);
+    printf("test: %d %d\n",counter, color_from_hue(counter, 0, 31, 31) * 1);
+    for (int i = 0; i < 8 * 8; i++) {
+      fb[i].r = color_from_hue(counter,  0, 31, 31) * 1;
+      fb[i].g = color_from_hue(counter, 16, 31, 31) * 2;
+      fb[i].b = color_from_hue(counter, 21, 31, 31) * 1;
+    }
+  }
+
+  printf("sleep(1000)\n");
+  sleep(1000);
+}
 
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat() {
-  // printf("Skal prøve...\n");
-  // if ((fd = open("/dev/input/eventX", O_RDWR, 0)) == -1)
-  //   err(1, "open failed\n");
-  // if (fstat(fd, &statbuf))
-  //   err(1, "fstat failed");
-  // printf("fd: %d\n", fd);
-  // printf("size: %d\n", statbuf.st_size);
-  // // printf("venter litt...\n");
-  // // usleep(3000000);
-  // read_buf = malloc(1000);
-  // write(fd, "X", 1);
-  // read(fd, read_buf, statbuf.st_size);
-  // ioctl(fd, RD_VALUE, read_buf);
-  // printf("read byte: %d\n", read_buf[0]);
-  // eventX = (char*) mmap(NULL, statbuf.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-  // printf("eventX addr: 0x%x\n", eventX);
-  // if (eventX == MAP_FAILED)
-  //   err(1, "mmap failed");
-  // close(fd);
-  // for (int i = 0; i < 10; i++) {
-  //   printf("Teller: %d\n", i);
-  //   printf("eventX: %c\n", *(eventX));
-  //   usleep(1000000);
-  // }
-  // printf("Sånn!\n");
-  // err(1, "hahahahah\n");
-
-  // read_buf = malloc(statbuf.st_size);
-  // read_buf[0] = 5;
-  // for (int i = 0; i < 5; i++)
-  //   printf("read_buf[%d]: %d\n", i, read_buf[i]);
-
-  // printf("venter litt...\n");
-  // usleep(3000000);
-
-
-  // Hello joystick
-  // while (1) {
-  //   fd = open("/dev/input/event0", O_RDONLY);
-  //   printf("reading...\n");
-  //   read(fd, &eventX_struct, sizeof(eventX_struct));
-  //   printf("done reading %d\n", eventX_struct.code);
-
-  //   pollfd_struct.fd = fd;
-  //   pollfd_struct.events = POLLIN;
-  //   printf("polling...\n");
-  //   poll(&pollfd_struct, 1, 3000);
-  //   printf("poll returned!\n");
-  //   while (read(fd, &eventX_struct, sizeof(eventX_struct)) > 0) {
-  //     // printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
-  //     // printf("KEY_UP: %d, event code: %d\n", KEY_UP, eventX_struct.code);
-  //     switch (eventX_struct.code) {
-  //     case KEY_UP:
-  //       printf("KEY_UP\n");
-  //       break;
-  //     case KEY_RIGHT:
-  //       printf("RIGHT\n");
-  //       break;
-  //     case KEY_DOWN:
-  //       printf("DOWN\n");
-  //       break;
-  //     case KEY_LEFT:
-  //       printf("LEFT\n");
-  //       break;
-  //     case KEY_ENTER:
-  //       printf("ENTER\n");
-  //       break;
-  //     case 0:
-  //       printf("RELEASED\n");
-  //       break;
-  //     default:
-  //       printf("Unknown key\n");
-  //     }
-  //   }
-  //   printf("no more events to read\n");
-  //   /* EAGAIN is returned when the queue is empty */
-  //   if (errno != EAGAIN) {
-  //     /* error */
-  //     printf("error\n");
-  //   }
-  //   printf("empty\n");
-  //   /* do something interesting with processed events */
-  // }
+  // testing();
+  // hello_joystick();
+  // hello_framebuffer();
 
   // Open eventX file and store file descriptor
   char* eventX_path = malloc(1000);
@@ -188,15 +290,21 @@ bool initializeSenseHat() {
   pollfd_struct.fd = fd;
   pollfd_struct.events = POLLIN;
 
-  // Initialize test_fix
-  test_fix = 0;
-  
-  // int read_ret = read(fd, &eventX_struct, sizeof(eventX_struct));
-  // printf("read_ret: %d\n", read_ret);
-  // printf("errno: %d\n", errno);
-  // printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
-  // usleep(1000);
+  // Initialize double_input_toggler
+  double_input_toggler = 0;
 
+  // Open framebuffer file and store descriptor
+  fb_dev_path = "/dev/fb0";
+  fb_fd = open(fb_dev_path, O_RDWR);
+
+  // Memory map framebuffer
+  fb = (fb_pixel_t*) mmap(NULL, 2 * 8 * 8, PROT_READ|PROT_WRITE, MAP_SHARED, fb_fd, 0);
+  if (fb == MAP_FAILED) printf("fb mmap failed\n");
+  close(fb_fd);
+
+  // Initialize color_hue_next
+  color_hue_next = 0;
+  
   // exit(1);
 
   return true;
@@ -206,6 +314,7 @@ bool initializeSenseHat() {
 // Here you can free up everything that you might have opened/allocated
 void freeSenseHat() {
   close(fd);
+  munmap(fb, 2 * 8 * 8);
 }
 
 // This function should return the key that corresponds to the joystick press
@@ -217,7 +326,7 @@ int readSenseHatJoystick() {
   int keycode = 0;
 
   while (1) {
-    // Poll eventX file with timeout of 1 ms and return if timeout or fail
+    // Poll eventX file with timeout of 1 ms and break out if it times out or fails
     int poll_ret = poll(&pollfd_struct, 1, 1);
     if (poll_ret <= 0) break;
 
@@ -234,10 +343,10 @@ int readSenseHatJoystick() {
         break;
     }
   }
-  // Test fix
+  // Hacky fix of double input problem
   if (keycode) {
-    test_fix = (test_fix + 1) % 2;
-    if (test_fix) keycode = 0;
+    double_input_toggler = !double_input_toggler;
+    if (double_input_toggler) keycode = 0;
   }
   return keycode;
 }
@@ -247,7 +356,12 @@ int readSenseHatJoystick() {
 // every game tick. The parameter playfieldChanged signals whether the game logic
 // has changed the playfield
 void renderSenseHatMatrix(bool const playfieldChanged) {
-  (void) playfieldChanged;
+  if (!playfieldChanged) return;
+  for (int i = 0; i < 8 * 8; i++) {
+    fb[i].r = colorfield[i].r;
+    fb[i].g = colorfield[i].b;
+    fb[i].b = colorfield[i].g;
+  }
 }
 
 
@@ -257,23 +371,30 @@ void renderSenseHatMatrix(bool const playfieldChanged) {
 
 static inline void newTile(coord const target) {
   game.playfield[target.y][target.x].occupied = true;
+  colorfield[target.x + 8 * target.y].r = color_from_hue(color_hue_next,  0, 31, 31) * 1;
+  colorfield[target.x + 8 * target.y].g = color_from_hue(color_hue_next, 10, 31, 31) * 2;
+  colorfield[target.x + 8 * target.y].b = color_from_hue(color_hue_next, 21, 31, 31) * 1;
+  color_hue_next = (color_hue_next + 13) % 31;
 }
 
 static inline void copyTile(coord const to, coord const from) {
   memcpy((void *) &game.playfield[to.y][to.x], (void *) &game.playfield[from.y][from.x], sizeof(tile));
+  memcpy((void *) &colorfield[to.x + 8 * to.y], (void *) &colorfield[from.x + 8 * from.y], sizeof(fb_pixel_t));
 }
 
 static inline void copyRow(unsigned int const to, unsigned int const from) {
   memcpy((void *) &game.playfield[to][0], (void *) &game.playfield[from][0], sizeof(tile) * game.grid.x);
-
+  memcpy((void *) &colorfield[8 * to], (void *) &colorfield[8 * from], sizeof(fb_pixel_t) * game.grid.x);
 }
 
 static inline void resetTile(coord const target) {
   memset((void *) &game.playfield[target.y][target.x], 0, sizeof(tile));
+  memset((void *) &colorfield[target.x + 8 * target.y], 0, sizeof(fb_pixel_t));
 }
 
 static inline void resetRow(unsigned int const target) {
   memset((void *) &game.playfield[target][0], 0, sizeof(tile) * game.grid.x);
+  memset((void *) &colorfield[8 * target], 0, sizeof(fb_pixel_t) * game.grid.x);
 }
 
 static inline bool tileOccupied(coord const target) {
