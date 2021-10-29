@@ -81,19 +81,21 @@ gameConfig game = {
 // Custom variables:
 int fd;
 struct pollfd pollfd_struct;
-char *event6;
+int X = 0;
+char *eventX;
 struct stat statbuf;
-struct input_event event6_struct;
+struct input_event eventX_struct;
 
 // Test variables:
 char *read_buf;
+int test_fix;
 
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat() {
   // printf("Skal prøve...\n");
-  // if ((fd = open("/dev/input/event6", O_RDWR, 0)) == -1)
+  // if ((fd = open("/dev/input/eventX", O_RDWR, 0)) == -1)
   //   err(1, "open failed\n");
   // if (fstat(fd, &statbuf))
   //   err(1, "fstat failed");
@@ -106,14 +108,14 @@ bool initializeSenseHat() {
   // read(fd, read_buf, statbuf.st_size);
   // ioctl(fd, RD_VALUE, read_buf);
   // printf("read byte: %d\n", read_buf[0]);
-  // event6 = (char*) mmap(NULL, statbuf.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-  // printf("event6 addr: 0x%x\n", event6);
-  // if (event6 == MAP_FAILED)
+  // eventX = (char*) mmap(NULL, statbuf.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+  // printf("eventX addr: 0x%x\n", eventX);
+  // if (eventX == MAP_FAILED)
   //   err(1, "mmap failed");
   // close(fd);
   // for (int i = 0; i < 10; i++) {
   //   printf("Teller: %d\n", i);
-  //   printf("event6: %c\n", *(event6));
+  //   printf("eventX: %c\n", *(eventX));
   //   usleep(1000000);
   // }
   // printf("Sånn!\n");
@@ -126,39 +128,76 @@ bool initializeSenseHat() {
 
   // printf("venter litt...\n");
   // usleep(3000000);
-fd = open("/dev/input/event0", O_RDONLY);
-pollfd_struct.fd = fd;
+
+
+  // Hello joystick
+  // while (1) {
+  //   fd = open("/dev/input/event0", O_RDONLY);
+  //   printf("reading...\n");
+  //   read(fd, &eventX_struct, sizeof(eventX_struct));
+  //   printf("done reading %d\n", eventX_struct.code);
+
+  //   pollfd_struct.fd = fd;
+  //   pollfd_struct.events = POLLIN;
+  //   printf("polling...\n");
+  //   poll(&pollfd_struct, 1, 3000);
+  //   printf("poll returned!\n");
+  //   while (read(fd, &eventX_struct, sizeof(eventX_struct)) > 0) {
+  //     // printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
+  //     // printf("KEY_UP: %d, event code: %d\n", KEY_UP, eventX_struct.code);
+  //     switch (eventX_struct.code) {
+  //     case KEY_UP:
+  //       printf("KEY_UP\n");
+  //       break;
+  //     case KEY_RIGHT:
+  //       printf("RIGHT\n");
+  //       break;
+  //     case KEY_DOWN:
+  //       printf("DOWN\n");
+  //       break;
+  //     case KEY_LEFT:
+  //       printf("LEFT\n");
+  //       break;
+  //     case KEY_ENTER:
+  //       printf("ENTER\n");
+  //       break;
+  //     case 0:
+  //       printf("RELEASED\n");
+  //       break;
+  //     default:
+  //       printf("Unknown key\n");
+  //     }
+  //   }
+  //   printf("no more events to read\n");
+  //   /* EAGAIN is returned when the queue is empty */
+  //   if (errno != EAGAIN) {
+  //     /* error */
+  //     printf("error\n");
+  //   }
+  //   printf("empty\n");
+  //   /* do something interesting with processed events */
+  // }
+
+  // Open eventX file and store file descriptor
+  char* eventX_path = malloc(1000);
+  sprintf(eventX_path, "/dev/input/event%d", X);
+  fd = open(eventX_path, O_RDONLY);
+  free(eventX_path);
+
+  // Set up poll struct
+  pollfd_struct.fd = fd;
   pollfd_struct.events = POLLIN;
-  while (1) {
-      printf("while(1)\n");
-      printf("polling...\n");
-      poll(&pollfd_struct, 1, 3000);
-      printf("poll returned!\n");
-        while (read (fd, &event6_struct, sizeof(event6_struct)) > 0) {
-                // process_event (event6_struct);
-                printf("event!\n");
-                printf("event: %d, %d, %d, %d\n", event6_struct.time, event6_struct.type, event6_struct.code, event6_struct.value);
-        }
-        printf("hmmm?\n");
-        /* EAGAIN is returned when the queue is empty */
-        if (errno != EAGAIN) {
-                /* error */
-                printf("error\n");
-        }
-        printf("empty\n");
-        /* do something interesting with processed events */
-}
 
-
+  // Initialize test_fix
+  test_fix = 0;
   
-  
-  int read_ret = read(fd, &event6_struct, sizeof(event6_struct));
-  printf("read_ret: %d\n", read_ret);
-  printf("errno: %d\n", errno);
-  printf("event: %d, %d, %d, %d\n", event6_struct.time, event6_struct.type, event6_struct.code, event6_struct.value);
-  usleep(1000);
+  // int read_ret = read(fd, &eventX_struct, sizeof(eventX_struct));
+  // printf("read_ret: %d\n", read_ret);
+  // printf("errno: %d\n", errno);
+  // printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
+  // usleep(1000);
 
-  exit(1);
+  // exit(1);
 
   return true;
 }
@@ -166,7 +205,7 @@ pollfd_struct.fd = fd;
 // This function is called when the application exits
 // Here you can free up everything that you might have opened/allocated
 void freeSenseHat() {
-
+  close(fd);
 }
 
 // This function should return the key that corresponds to the joystick press
@@ -174,7 +213,33 @@ void freeSenseHat() {
 // and KEY_ENTER, when the the joystick is pressed
 // !!! when nothing was pressed you MUST return 0 !!!
 int readSenseHatJoystick() {
-  return 0;
+  // Default return value should be 0
+  int keycode = 0;
+
+  while (1) {
+    // Poll eventX file with timeout of 1 ms and return if timeout or fail
+    int poll_ret = poll(&pollfd_struct, 1, 1);
+    if (poll_ret <= 0) break;
+
+    // Read input and set keycode if recognized
+    read(fd, &eventX_struct, sizeof(eventX_struct));
+    switch (eventX_struct.code) {
+      case KEY_UP:
+      case KEY_RIGHT:
+      case KEY_DOWN:
+      case KEY_LEFT:
+      case KEY_ENTER:
+        keycode = eventX_struct.code;
+      default:
+        break;
+    }
+  }
+  // Test fix
+  if (keycode) {
+    test_fix = (test_fix + 1) % 2;
+    if (test_fix) keycode = 0;
+  }
+  return keycode;
 }
 
 
