@@ -103,6 +103,10 @@ char *read_buf;
 
 
 // Custom functions:
+/*
+ * Generate a color value for 1 color channel from a hue and offset.
+ * Disclaimer: this is not an exact or beautiful science
+ */
 int color_from_hue(int hue, int offset, int hue_max, int max) {
   int hue_scale = max / hue_max;
   int res = 0;
@@ -114,54 +118,16 @@ int color_from_hue(int hue, int offset, int hue_max, int max) {
   return res;
 }
 
+/*
+ * Converts a pixel struct to a short (16-bit number) that can be sent to the framebuffer
+ */
 short color_short_from_struct(fb_pixel_t* pixel) {
   return (short) ((pixel->r & 0b11111) << (5 + 6)) | ((pixel->g & 0b111111) << 5) | ((pixel->b & 0b11111) << 0);
 }
 
-
-void testing() {
-  printf("Skal prøve...\n");
-  if ((fd = open("/dev/input/eventX", O_RDWR, 0)) == -1)
-    err(1, "open failed\n");
-  if (fstat(fd, &statbuf))
-    err(1, "fstat failed");
-  printf("fd: %d\n", fd);
-  printf("size: %d\n", statbuf.st_size);
-  // printf("venter litt...\n");
-  // usleep(3000000);
-  read_buf = malloc(1000);
-  write(fd, "X", 1);
-  read(fd, read_buf, statbuf.st_size);
-  ioctl(fd, RD_VALUE, read_buf);
-  printf("read byte: %d\n", read_buf[0]);
-  eventX = (char*) mmap(NULL, statbuf.st_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-  printf("eventX addr: 0x%x\n", eventX);
-  if (eventX == MAP_FAILED)
-    err(1, "mmap failed");
-  close(fd);
-  for (int i = 0; i < 10; i++) {
-    printf("Teller: %d\n", i);
-    printf("eventX: %c\n", *(eventX));
-    usleep(1000000);
-  }
-  printf("Sånn!\n");
-  err(1, "hahahahah\n");
-
-  read_buf = malloc(statbuf.st_size);
-  read_buf[0] = 5;
-  for (int i = 0; i < 5; i++)
-    printf("read_buf[%d]: %d\n", i, read_buf[i]);
-
-  printf("venter litt...\n");
-  usleep(3000000);
-
-  int read_ret = read(fd, &eventX_struct, sizeof(eventX_struct));
-  printf("read_ret: %d\n", read_ret);
-  printf("errno: %d\n", errno);
-  printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
-  usleep(1000);
-}
-
+/*
+ * Opens the joystick as a file and stores its file descriptor in *fd
+ */
 int open_joystick(int *fd, char *wanted_name) {
   char device_path [1000];
   for (int i = 0; i < 32; i++) {
@@ -200,61 +166,10 @@ int open_joystick(int *fd, char *wanted_name) {
   return 0;
 }
 
-void hello_joystick() {
-  // Hello joystick
-  while (1) {
-    if (open_joystick(&fd, "Raspberry Pi Sense HAT Joystick") < 0) {
-      printf("open_joystick failed");
-      return;
-    }
-    
-    printf("reading...\n");
-    read(fd, &eventX_struct, sizeof(eventX_struct));
-    printf("done reading %d\n", eventX_struct.code);
-
-    pollfd_struct.fd = fd;
-    pollfd_struct.events = POLLIN;
-    printf("polling...\n");
-    poll(&pollfd_struct, 1, 3000);
-    printf("poll returned!\n");
-    while (read(fd, &eventX_struct, sizeof(eventX_struct)) > 0) {
-      // printf("event: %d, %d, %d, %d\n", eventX_struct.time, eventX_struct.type, eventX_struct.code, eventX_struct.value);
-      // printf("KEY_UP: %d, event code: %d\n", KEY_UP, eventX_struct.code);
-      switch (eventX_struct.code) {
-      case KEY_UP:
-        printf("KEY_UP\n");
-        break;
-      case KEY_RIGHT:
-        printf("RIGHT\n");
-        break;
-      case KEY_DOWN:
-        printf("DOWN\n");
-        break;
-      case KEY_LEFT:
-        printf("LEFT\n");
-        break;
-      case KEY_ENTER:
-        printf("ENTER\n");
-        break;
-      case 0:
-        printf("RELEASED\n");
-        break;
-      default:
-        printf("Unknown key\n");
-      }
-    }
-    printf("no more events to read\n");
-    /* EAGAIN is returned when the queue is empty */
-    if (errno != EAGAIN) {
-      /* error */
-      printf("error\n");
-    }
-    printf("empty\n");
-    /* do something interesting with processed events */
-  }
-}
-
-int open_framebuffer(short **fb, char *id) {
+/*
+ * Opens the framebuffer and memory maps it to **fb
+ */
+int open_framebuffer(short **fb, char *wanted_id) {
   for (int i = 0; i < 32; i++) {
     fb_dev_path = (char*) malloc(1000 * sizeof(char));
     sprintf(fb_dev_path, "/dev/fb%d", i);
@@ -285,10 +200,10 @@ int open_framebuffer(short **fb, char *id) {
     // char expected_id[1000] = "RPi-Sense FB";
     int id_correct = 1;
     for (int j = 0; 1; j++) {
-      if ((fb_fscreeninfo.id[j] == (char) 0) || (id[j] == 0)) {
+      if ((fb_fscreeninfo.id[j] == (char) 0) || (wanted_id[j] == 0)) {
         break;
       }
-      if (fb_fscreeninfo.id[j] != (char) id[j]) {
+      if (fb_fscreeninfo.id[j] != (char) wanted_id[j]) {
         id_correct = 0;
         break;
       }
@@ -309,42 +224,11 @@ int open_framebuffer(short **fb, char *id) {
   close(fb_fd);
 }
 
-void hello_framebuffer() {
-  // Hello framebuffer:
-  printf("Hello frambuffer\n");
-  printf("Size: %d\n", sizeof(fb_pixel_t));
-  fb_test.r = 15;
-  fb_test.g = 7;
-  fb_test.b = 3;
-  printf("test: %x %x\n", *((__u8*) &fb_test), *(((__u8*) &fb_test) + 1));
-
-  // Memory map framebuffer
-  int open_fb_ret = open_framebuffer(&fb, "RPi-Sense FB");
-  if (open_fb_ret < 0) {
-    printf("Could not open framebuffer\n");
-  }
-
-  printf("write to fb\n");
-  for (int counter = 0; 1; counter = (counter + 1) % 31) {
-    usleep(20000);
-    printf("test: %d %d\n",counter, color_from_hue(counter, 0, 31, 31) * 1);
-    for (int i = 0; i < 8 * 8; i++) {
-      fb_pixel.r = color_from_hue(counter,  0, 31, 31) * 1;
-      fb_pixel.g = color_from_hue(counter, 16, 31, 31) * 2;
-      fb_pixel.b = color_from_hue(counter, 21, 31, 31) * 1;
-      fb[i] = color_short_from_struct(&fb_pixel);
-    }
-  }
-
-  printf("sleep(1000)\n");
-  sleep(1000);
-}
-
 // This function is called on the start of your application
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat() {
-  // Open joystick input file as fd
+  // Open joystick input file
   if (open_joystick(&fd, "Raspberry Pi Sense HAT Joystick") < 0) {
     printf("Could not open joystick");
     return false;
@@ -357,7 +241,7 @@ bool initializeSenseHat() {
   // Initialize double_input_toggler
   double_input_toggler = 0;
 
-  // Memory map framebuffer as fb
+  // Memory map framebuffer
   if (open_framebuffer(&fb, "RPi-Sense FB") < 0) {
     printf("Could not open framebuffer\n");
     return false;
@@ -365,8 +249,6 @@ bool initializeSenseHat() {
 
   // Initialize color_hue_next
   color_hue_next = 0;
-  
-  // exit(1);
 
   return true;
 }
