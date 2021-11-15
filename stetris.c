@@ -74,16 +74,15 @@ gameConfig game = {
 
 // Custom types:
 // Framebuffer pixel struct type
-typedef struct __attribute__((__packed__)) {
-  int b:5;
-  int g:6;
+typedef struct {
   int r:5;
+  int g:6;
+  int b:5;
 } fb_pixel_t;
 
 // Custom variables:
 int                       fd;                    // Joystick events file descriptor
 struct pollfd             pollfd_struct;         // Joystick events pollfd struct
-int                       X = 0;                 // Joystick events file number
 char                     *eventX;                // Joystick events memory mapped
 struct stat               statbuf;               // Joystick events statbuf
 struct input_event        eventX_struct;         // Joystick events read struct
@@ -92,11 +91,12 @@ char                     *fb_dev_path;           // Framebuffer device file path
 struct stat               fb_statbuf;            // Framebuffer statbuf
 struct fb_fix_screeninfo  fb_fscreeninfo;        // Framebuffer fixed screeninfo struct
 struct fb_var_screeninfo  fb_vscreeninfo;        // Framebuffer varialbe screeninfo struct
-fb_pixel_t                *fb;                   // Framebuffer memory mapped
-fb_pixel_t                 fb_test;              // Framebuffer struct for testing
-fb_pixel_t                 colorfield[8 * 8 * sizeof(fb_pixel_t)]; // Array of colors for pixel at colorfield[x + (8 * y)]
-int                        color_hue_next;       // Next color hue to apply
-int                        double_input_toggler; // Used to fix double input problem
+short                    *fb;                    // Framebuffer memory mapped
+fb_pixel_t                fb_pixel;              // Framebuffer pixel
+fb_pixel_t                fb_test;               // Framebuffer struct for testing
+fb_pixel_t                colorfield[8 * 8 * sizeof(fb_pixel_t)]; // Array of colors for pixel at colorfield[x + (8 * y)]
+int                       color_hue_next;        // Next color hue to apply
+int                       double_input_toggler;  // Used to fix double input problem
 
 // Test variables:
 char *read_buf;
@@ -112,6 +112,10 @@ int color_from_hue(int hue, int offset, int hue_max, int max) {
   if (res < 0) res = 0;
   if (res > max) res = max;
   return res;
+}
+
+short color_short_from_struct(fb_pixel_t* pixel) {
+  return (short) ((pixel->r & 0b11111) << (5 + 6)) | ((pixel->g & 0b111111) << 5) | ((pixel->b & 0b11111) << 0);
 }
 
 
@@ -158,10 +162,52 @@ void testing() {
   usleep(1000);
 }
 
+int open_joystick(int *fd, char *wanted_name) {
+  char device_path [1000];
+  for (int i = 0; i < 32; i++) {
+    sprintf(device_path, "/dev/input/event%d", i);
+    *fd = open(device_path, O_RDONLY);
+    char name[1000];
+    int ioctl_ret = ioctl(*fd, EVIOCGNAME(1000), name);
+    if (ioctl_ret < 0) {
+      printf("Could not find %s\n", device_path);
+      continue;
+    }
+
+    printf("name: %s\n", name);
+
+    int name_correct = 1;
+    for (int j = 0; 1; j++) {
+      if ((name[j] == (char) 0) || (wanted_name[j] == (char) 0)) {
+        break;
+      }
+      if (name[j] != wanted_name[j]) {
+        name_correct = 0;
+        break;
+      }
+    }
+
+    if (name_correct) {
+      break;
+    }
+
+    // Return error if not even number 31 is correct
+    if (i == 31) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
 void hello_joystick() {
   // Hello joystick
   while (1) {
-    fd = open("/dev/input/event0", O_RDONLY);
+    if (open_joystick(&fd, "Raspberry Pi Sense HAT Joystick") < 0) {
+      printf("open_joystick failed");
+      return;
+    }
+    
     printf("reading...\n");
     read(fd, &eventX_struct, sizeof(eventX_struct));
     printf("done reading %d\n", eventX_struct.code);
@@ -208,6 +254,61 @@ void hello_joystick() {
   }
 }
 
+int open_framebuffer(short **fb, char *id) {
+  for (int i = 0; i < 32; i++) {
+    fb_dev_path = (char*) malloc(1000 * sizeof(char));
+    sprintf(fb_dev_path, "/dev/fb%d", i);
+    printf("opening %s\n", fb_dev_path);
+    fb_fd = open(fb_dev_path, O_RDWR);
+    int ioctl_ret = ioctl(fb_fd, FBIOGET_FSCREENINFO, &fb_fscreeninfo);
+
+    printf("ioctl_ret: %d\n", ioctl_ret);
+    ioctl_ret = ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_vscreeninfo);
+    printf("ioctl_ret: %d\n", ioctl_ret);
+
+    switch (errno) {
+      case EBADF: printf("EBADF\n"); break;
+      case EFAULT: printf("EFAULT\n"); break;
+      case EINVAL: printf("EINVAL\n"); break;
+      case ENOTTY: printf("ENOTTY\n"); break;
+      case 0: printf("SUCCESS\n"); break;
+      default: printf("none above\n"); break;
+    }
+
+    if (ioctl_ret < 0) {
+      printf("could not find %s\n", fb_dev_path);
+      continue;
+    }
+
+    printf("id: %s\n", fb_fscreeninfo.id);
+
+    // char expected_id[1000] = "RPi-Sense FB";
+    int id_correct = 1;
+    for (int j = 0; 1; j++) {
+      if ((fb_fscreeninfo.id[j] == (char) 0) || (id[j] == 0)) {
+        break;
+      }
+      if (fb_fscreeninfo.id[j] != (char) id[j]) {
+        id_correct = 0;
+        break;
+      }
+    }
+
+    if (id_correct) {
+      break;
+    }
+
+    // Return error if not even number 31 is correct
+    if (i == 31) {
+      return -1;
+    }
+  }
+
+  *fb = (short*) mmap(NULL, 2 * 8 * 8, PROT_READ|PROT_WRITE, MAP_SHARED, fb_fd, 0);
+  if (*fb == MAP_FAILED) printf("fb mmap failed\n");
+  close(fb_fd);
+}
+
 void hello_framebuffer() {
   // Hello framebuffer:
   printf("Hello frambuffer\n");
@@ -216,55 +317,22 @@ void hello_framebuffer() {
   fb_test.g = 7;
   fb_test.b = 3;
   printf("test: %x %x\n", *((__u8*) &fb_test), *(((__u8*) &fb_test) + 1));
-  fb_dev_path = "/dev/fb0";
-  fb_fd = open(fb_dev_path, O_RDWR);
-  int ioctl_ret = ioctl(fb_fd, FBIOGET_FSCREENINFO, &fb_fscreeninfo);
-  printf("ioctl_ret: %d\n", ioctl_ret);
-  ioctl_ret = ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_vscreeninfo);
-  printf("ioctl_ret: %d\n", ioctl_ret);
-
-  switch (errno) {
-    case EBADF: printf("EBADF\n"); break;
-    case EFAULT: printf("EFAULT\n"); break;
-    case EINVAL: printf("EINVAL\n"); break;
-    case ENOTTY: printf("ENOTTY\n"); break;
-    case 0: printf("SUCCESS\n"); break;
-    default: printf("none above\n"); break;
-  }
-
-  printf("fixed screeninfo:\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n",
-    fb_fscreeninfo.type,
-    fb_fscreeninfo.type_aux,
-    fb_fscreeninfo.mmio_len,
-    fb_fscreeninfo.mmio_start,
-    fb_fscreeninfo.accel,
-    fb_fscreeninfo.capabilities
-  );
-
-  printf("variable screeninfo:\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n  %d\n",
-    fb_vscreeninfo.xres,
-    fb_vscreeninfo.yres,
-    fb_vscreeninfo.xres_virtual,
-    fb_vscreeninfo.yres_virtual,
-    fb_vscreeninfo.grayscale,
-    fb_vscreeninfo.bits_per_pixel,
-    fb_vscreeninfo.height,
-    fb_vscreeninfo.width
-  );
 
   // Memory map framebuffer
-  fb = (fb_pixel_t*) mmap(NULL, 2 * 8 * 8, PROT_READ|PROT_WRITE, MAP_SHARED, fb_fd, 0);
-  if (fb == MAP_FAILED) printf("fb mmap failed\n");
-  close(fb_fd);
+  int open_fb_ret = open_framebuffer(&fb, "RPi-Sense FB");
+  if (open_fb_ret < 0) {
+    printf("Could not open framebuffer\n");
+  }
 
   printf("write to fb\n");
   for (int counter = 0; 1; counter = (counter + 1) % 31) {
     usleep(20000);
     printf("test: %d %d\n",counter, color_from_hue(counter, 0, 31, 31) * 1);
     for (int i = 0; i < 8 * 8; i++) {
-      fb[i].r = color_from_hue(counter,  0, 31, 31) * 1;
-      fb[i].g = color_from_hue(counter, 16, 31, 31) * 2;
-      fb[i].b = color_from_hue(counter, 21, 31, 31) * 1;
+      fb_pixel.r = color_from_hue(counter,  0, 31, 31) * 1;
+      fb_pixel.g = color_from_hue(counter, 16, 31, 31) * 2;
+      fb_pixel.b = color_from_hue(counter, 21, 31, 31) * 1;
+      fb[i] = color_short_from_struct(&fb_pixel);
     }
   }
 
@@ -276,15 +344,11 @@ void hello_framebuffer() {
 // Here you can initialize what ever you need for your task
 // return false if something fails, else true
 bool initializeSenseHat() {
-  // testing();
-  // hello_joystick();
-  // hello_framebuffer();
-
-  // Open eventX file and store file descriptor
-  char* eventX_path = malloc(1000);
-  sprintf(eventX_path, "/dev/input/event%d", X);
-  fd = open(eventX_path, O_RDONLY);
-  free(eventX_path);
+  // Open joystick input file as fd
+  if (open_joystick(&fd, "Raspberry Pi Sense HAT Joystick") < 0) {
+    printf("Could not open joystick");
+    return false;
+  }
 
   // Set up poll struct
   pollfd_struct.fd = fd;
@@ -293,14 +357,11 @@ bool initializeSenseHat() {
   // Initialize double_input_toggler
   double_input_toggler = 0;
 
-  // Open framebuffer file and store descriptor
-  fb_dev_path = "/dev/fb0";
-  fb_fd = open(fb_dev_path, O_RDWR);
-
-  // Memory map framebuffer
-  fb = (fb_pixel_t*) mmap(NULL, 2 * 8 * 8, PROT_READ|PROT_WRITE, MAP_SHARED, fb_fd, 0);
-  if (fb == MAP_FAILED) printf("fb mmap failed\n");
-  close(fb_fd);
+  // Memory map framebuffer as fb
+  if (open_framebuffer(&fb, "RPi-Sense FB") < 0) {
+    printf("Could not open framebuffer\n");
+    return false;
+  }
 
   // Initialize color_hue_next
   color_hue_next = 0;
@@ -358,9 +419,7 @@ int readSenseHatJoystick() {
 void renderSenseHatMatrix(bool const playfieldChanged) {
   if (!playfieldChanged) return;
   for (int i = 0; i < 8 * 8; i++) {
-    fb[i].r = colorfield[i].r;
-    fb[i].g = colorfield[i].b;
-    fb[i].b = colorfield[i].g;
+    fb[i] = color_short_from_struct(&(colorfield[i]));;
   }
 }
 
